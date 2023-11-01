@@ -1,0 +1,122 @@
+---
+title: "DEG_volcano"
+author: "Maisha Adiba"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+First, set function for PCA, and DEG analysis
+
+```{r set function}
+
+performDEGAnalysis <- function(contrast_oe, outputFile) {
+  # Load libraries
+  library("DESeq2")
+  library(ggplot2)
+  library(tidyverse)
+  library(dplyr)
+  library(pheatmap)
+  library(RColorBrewer)
+  library(tidyr)
+  library(PCAtools)
+  library(syndRomics)
+  library(ggrepel)
+  
+  # Load Raw files
+  countData <- read.csv(file.choose(), row.names = 1)
+  metaData <- read.csv(file.choose(), row.names = 1)
+  
+  # Check that sample names match in both files
+  all(colnames(countData) %in% rownames(metaData))
+  all(colnames(countData) == rownames(metaData))
+  
+  # Remove NAs
+  countData <- na.omit(countData)
+  
+  # Create DESeq2 object
+  dds <- DESeqDataSetFromMatrix(countData = countData, colData = metaData, design = ~Type)
+  
+  # Estimate size factors
+  dds <- estimateSizeFactors(dds)
+  
+  # Perform DESeq
+  dds <- DESeq(dds)
+  
+  # Plot PCA analysis
+  vst <- assay(vst(dds, blind = FALSE))
+  p <- pca(vst, metadata = metaData, removeVar = 0.1)
+  
+  # Scree plot
+  screeplot(p, axisLabSize = 18, titleLabSize = 22)
+  pcaplot <- biplot(p,
+                    colby = 'Type', colkey = c('HIV' = '#79155B', 'Bs' = '#C23373', 'Ac' = '#F6635C', 'Nac' = '#33BBC5'),
+                    colLegendTitle = 'Type',
+                    encircle = TRUE,
+                    encircleFill = TRUE,
+                    hline = 0, vline = c(-25, 0, 25),
+                    legendPosition = 'top', legendLabSize = 8, legendIconSize = 5.0)
+  
+  ggsave(file = paste0("DE",Type, "_PCA.pdf"), width = 6, height = 6)
+  
+  png('pcaplot.png')
+  plot(pcaplot)
+  dev.off()
+  
+  # Perform DESeq2 DEG analysis
+  res_table <- results(dds, contrast = contrast_oe, alpha = 0.05)
+  summary(res_table)
+  res <- res_table[order(res_table$padj),]
+  res_df <- as.data.frame(res)
+  
+   # Assign the Col column
+  res_df$Col <- ifelse(res_df$padj < 0.05 & res_df$log2FoldChange > 0.5, "Sig_UP",
+                       ifelse(res_df$padj < 0.05 & res_df$log2FoldChange < 0.5, "Sig_Down", "NonSig"))
+  res_df <- na.omit(res_df)
+  
+  write.table(res_df, file = paste0("DE_Gene_", contrast_oe[2], "_vs_", contrast_oe[3], "_P05.csv"), sep = ",", qmethod = "double", col.names = NA)
+  
+  # Return the result
+  return(res_df)
+}
+
+```
+
+
+If want to loop the contrasts 
+
+
+```{r set function}
+# Set the working directory
+setwd("//hpi.intern/data/cloud-drive/230925_MA_E05_Collab_with_Angelique/DEG_complete_231030")
+
+# Define your types
+types <- c("Nac", "Ac", "Bs", "HIV")
+
+# Create a directory to store the output
+output_dir <- "DEG_Results"
+dir.create(output_dir, showWarnings = FALSE)
+
+# Perform DEG analysis for each pair of types
+results_list <- list()
+for (i in 1:(length(types) - 1)) {
+  for (j in (i + 1):length(types)) {
+    type1 <- types[i]
+    type2 <- types[j]
+    
+    # Define the contrast with reference level included
+    contrast <- c("Type", type1, type2)
+    
+    # Perform DEG analysis for the contrast
+    result <- performDEGAnalysis(contrast, outputFile = file.path(output_dir, paste0("outputContrast_", type1, "_vs_", type2, ".csv")))
+    results_list[[length(results_list) + 1]] <- result
+  }
+}
+
+# Save the results to a list or any other format you prefer
+# results_list contains the DEG results for all valid pairwise Type comparisons
+```
